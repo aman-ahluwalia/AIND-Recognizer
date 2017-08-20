@@ -75,6 +75,25 @@ class SelectorBIC(ModelSelector):
         :return: GaussianHMM object
         """
         warnings.filterwarnings("ignore", category=DeprecationWarning)
+        best_model = GaussianHMM()
+        best_score = float('inf')
+        N = len(self.X)
+        for component in range(self.min_n_components, self.max_n_components+1):
+            try:
+                hmm_model = GaussianHMM(n_components=component, covariance_type="diag", n_iter=1000,
+                                        random_state=self.random_state, verbose=False).fit(self.X, self.lengths)
+                
+                d = self.X.shape[1]
+                log_l = hmm_model.score(self.X, self.lengths)
+                p = component*component + 2*component*d-1
+                bic_score = -(2 * log_l) + (p * np.log(N)) 
+    
+                if bic_score < best_score:
+                    best_score = bic_score
+                    best_model = hmm_model
+            except Exception as e:
+                continue
+        return best_model
 
         # TODO implement model selection based on BIC scores
         raise NotImplementedError
@@ -88,11 +107,39 @@ class SelectorDIC(ModelSelector):
     http://citeseerx.ist.psu.edu/viewdoc/download?doi=10.1.1.58.6208&rep=rep1&type=pdf
     DIC = log(P(X(i)) - 1/(M-1)SUM(log(P(X(all but i))
     '''
+    def get_other_words_score(self, model):
+        tot_score = 0
+        count = 0
+        for word, features in self.hwords.items():
+            if word == self.this_word:
+                continue
+            count += 1
+            try:
+                X, lengths = features
+                tot_score += model.score(X, lengths)
+            except Exception as e:
+                continue
+        return tot_score/count
 
     def select(self):
         warnings.filterwarnings("ignore", category=DeprecationWarning)
 
         # TODO implement model selection based on DIC scores
+        best_model = None
+        best_score = float('-inf')
+        for n in range(self.min_n_components, self.max_n_components+1):
+            try:
+                hmm_model = GaussianHMM(n_components=n, covariance_type="diag", n_iter=1000,
+                                        random_state=self.random_state, verbose=False).fit(self.X, self.lengths)
+                score = hmm_model.score(self.X, self.lengths)
+                other_score = self.get_other_words_score(hmm_model)
+                score -= other_score 
+                if score > best_score:
+                    best_score = score
+                    best_model = hmm_model
+            except Exception as e:
+                continue
+        return best_model
         raise NotImplementedError
 
 
@@ -105,4 +152,31 @@ class SelectorCV(ModelSelector):
         warnings.filterwarnings("ignore", category=DeprecationWarning)
 
         # TODO implement model selection using CV
-        raise NotImplementedError
+        best_model = GaussianHMM()
+        best_score = float('-inf')
+        for n in range(self.min_n_components, self.max_n_components+1):
+            try:
+                folds = 0
+                score = 0
+                for cv_train_idx, cv_test_idx in KFold(min(len(self.lengths), 3)).split(self.sequences):
+                    folds += 1
+                    if n < folds:
+                        score = 0
+                        continue
+                    x_train, lengths_train = combine_sequences(cv_train_idx, self.sequences)
+                    x_test, lengths_test = combine_sequences(cv_test_idx, self.sequences)
+    
+                    hmm_model = GaussianHMM(n_components=n, covariance_type="diag", n_iter=1000,
+                                        random_state=self.random_state, verbose=False).fit(x_train, lengths_train)
+    
+                    score += hmm_model.score(x_test, lengths_test)
+    
+                avg_score = score/folds
+                if avg_score > best_score:
+                    best_score = avg_score
+                    best_model = hmm_model
+            except Exception as e:
+                continue
+        return best_model
+
+        # raise NotImplementedError
